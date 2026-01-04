@@ -9,6 +9,12 @@
 import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ConfigLoader, PartialConfig } from '../config/loader';
+import { createStoryParser, UserStory } from '../parser/story-parser';
+import { createAIService, APIKeyNotConfiguredError, AIServiceUnavailableError, TestCase } from '../ai/openai-service';
+import { createJavaTestGenerator, deriveClassName } from '../generator/java-generator';
+import { createOutputWriter } from '../output/writer';
+import { createInteractiveSession } from '../interactive/index';
 
 /**
  * CLI Options interface for the generate command
@@ -20,6 +26,8 @@ export interface CLIOptions {
   interactive?: boolean;
   config?: string;
   model?: string;
+  packageName?: string;
+  namingConvention?: string;
 }
 
 /**
@@ -114,6 +122,8 @@ export function createProgram(): Command {
     .option('-i, --interactive', 'Enable interactive mode to review and select test cases', false)
     .option('-c, --config <path>', 'Path to configuration file')
     .option('-m, --model <model>', 'AI model to use (e.g., gpt-4, gpt-3.5-turbo)')
+    .option('-p, --package-name <package>', 'Java package name for generated tests')
+    .option('-n, --naming-convention <convention>', 'Test naming convention: should, given_when_then, or test')
     .action(async (options: CLIOptions) => {
       await handleGenerateCommand(options);
     });
@@ -130,60 +140,207 @@ export function createProgram(): Command {
 
 /**
  * Handles the generate command execution
+ * Connects CLI → Config → Parser → AI → Generator → Output
+ * Requirements: All
  */
 export async function handleGenerateCommand(options: CLIOptions): Promise<void> {
-  // Validate story source
-  const sourceValidation = validateStorySource(options);
-  if (!sourceValidation.isValid) {
-    console.error(sourceValidation.error);
-    process.exit(1);
-  }
-  
-  // Get the user story text
-  let storyText: string;
-  
-  if (options.file) {
-    // Validate file exists
-    const fileValidation = validateFileExists(options.file);
-    if (!fileValidation.isValid) {
-      console.error(fileValidation.error);
+  try {
+    // Step 1: Validate story source
+    const sourceValidation = validateStorySource(options);
+    if (!sourceValidation.isValid) {
+      console.error(sourceValidation.error);
       process.exit(1);
     }
     
-    storyText = readStoryFromFile(options.file);
+    // Step 2: Get the user story text
+    let storyText: string;
     
-    if (!storyText) {
-      console.error('Error: The specified file is empty.\n\nPlease provide a file with a valid user story.');
+    if (options.file) {
+      // Validate file exists
+      const fileValidation = validateFileExists(options.file);
+      if (!fileValidation.isValid) {
+        console.error(fileValidation.error);
+        process.exit(1);
+      }
+      
+      storyText = readStoryFromFile(options.file);
+      
+      if (!storyText) {
+        console.error('Error: The specified file is empty.\n\nPlease provide a file with a valid user story.');
+        process.exit(1);
+      }
+    } else {
+      storyText = options.story!;
+    }
+    
+    // Validate story is not empty
+    if (!storyText.trim()) {
+      console.error('Error: User story cannot be empty.\n\nUsage: tdd-assistant generate --story "<user story>"');
       process.exit(1);
     }
-  } else {
-    storyText = options.story!;
-  }
-  
-  // Validate story is not empty
-  if (!storyText.trim()) {
-    console.error('Error: User story cannot be empty.\n\nUsage: tdd-assistant generate --story "<user story>"');
+    
+    // Step 3: Load configuration
+    console.log('Loading configuration...');
+    const configLoader = new ConfigLoader();
+    const cliOverrides: PartialConfig = {};
+    
+    if (options.model) {
+      cliOverrides.aiModel = options.model;
+    }
+    if (options.output) {
+      cliOverrides.outputDirectory = options.output;
+    }
+    if (options.packageName) {
+      cliOverrides.packageName = options.packageName;
+    }
+    if (options.namingConvention) {
+      const convention = options.namingConvention.toLowerCase();
+      if (convention === 'should' || convention === 'given_when_then' || convention === 'test') {
+        cliOverrides.testNamingConvention = convention;
+      } else {
+        console.error(`Error: Invalid naming convention '${options.namingConvention}'. Use: should, given_when_then, or test`);
+        process.exit(1);
+      }
+    }
+    
+    const configResult = configLoader.load(cliOverrides, options.config);
+    const config = configResult.config;
+    
+    if (configResult.source === 'file') {
+      console.log(`Using configuration from: ${configResult.filePath}`);
+    }
+    
+    // Step 4: Parse the user story
+    console.log('Parsing user story...');
+    const storyParser = createStoryParser();
+    const userStory: UserStory = storyParser.parse(storyText);
+    
+    // Validate the parsed story
+    const validation = storyParser.validate(userStory);
+    if (!validation.isValid) {
+      console.error('\nWarning: User story may be incomplete:');
+      for (const error of validation.errors) {
+        console.error(`  - ${error}`);
+      }
+      console.error('');
+      
+      // Continue anyway, but warn the user
+      if (!userStory.role && !userStory.feature) {
+        console.error('Error: Could not parse user story. Please use the format:');
+        console.error('  "As a [role], I want [feature], so that [benefit]"');
+        process.exit(1);
+      }
+    }
+    
+    console.log(`  Role: ${userStory.role || '(not specified)'}`);
+    console.log(`  Feature: ${userStory.feature || '(not specified)'}`);
+    console.log(`  Benefit: ${userStory.benefit || '(not specified)'}`);
+    
+    // Step 5: Extract test cases using AI
+    console.log('\nAnalyzing user story with AI...');
+    const aiService = createAIService({
+      apiKey: config.apiKey,
+      model: config.aiModel
+    });
+    
+    let testCases: TestCase[];
+    try {
+      testCases = await aiService.extractTestCases(userStory);
+    } catch (error) {
+      if (error instanceof APIKeyNotConfiguredError) {
+        console.error('\n' + error.message);
+        process.exit(1);
+      }
+      if (error instanceof AIServiceUnavailableError) {
+        console.error('\n' + error.message);
+        process.exit(1);
+      }
+      throw error;
+    }
+    
+    console.log(`Generated ${testCases.length} test case(s)`);
+    
+    if (testCases.length === 0) {
+      console.error('\nError: No test cases could be generated from the user story.');
+      console.error('Please try providing a more detailed user story with acceptance criteria.');
+      process.exit(1);
+    }
+    
+    // Step 6: Interactive mode - allow user to select/edit test cases
+    if (options.interactive) {
+      console.log('\nEntering interactive mode...');
+      const interactiveSession = createInteractiveSession();
+      
+      const result = await interactiveSession.selectTestCases(testCases);
+      
+      if (result.cancelled) {
+        console.log('Generation cancelled.');
+        process.exit(0);
+      }
+      
+      testCases = result.selectedTestCases;
+      
+      if (testCases.length === 0) {
+        console.log('No test cases selected. Exiting.');
+        process.exit(0);
+      }
+    }
+    
+    // Step 7: Generate Java test code
+    console.log('\nGenerating JUnit 5 test code...');
+    const generator = createJavaTestGenerator();
+    
+    // Derive class name from the feature
+    const className = deriveClassName(userStory.feature || 'Generated');
+    
+    const generatedTest = generator.generate(testCases, config, className);
+    
+    // Step 8: Output the generated code
+    const outputWriter = createOutputWriter();
+    
+    if (options.output || config.outputDirectory !== 'src/test/java') {
+      // Write to file
+      const outputDir = options.output || config.outputDirectory;
+      console.log(`\nWriting test file to: ${outputDir}`);
+      
+      try {
+        const filePath = await outputWriter.writeToFile(generatedTest, outputDir);
+        console.log(`\nSuccess! Test file created: ${filePath}`);
+        console.log(`\nGenerated ${testCases.length} test method(s):`);
+        for (const method of generatedTest.testMethods) {
+          console.log(`  - ${method.name}`);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('EACCES')) {
+          console.error(`\nError: Permission denied writing to ${outputDir}`);
+          console.error('Please check directory permissions or try a different output location.');
+          process.exit(1);
+        }
+        throw error;
+      }
+    } else {
+      // Write to stdout
+      console.log('\n--- Generated Test Code ---\n');
+      outputWriter.writeToStdout(generatedTest);
+      console.log('\n--- End of Generated Code ---');
+      console.log(`\nGenerated ${testCases.length} test method(s)`);
+    }
+    
+    console.log('\nDone! Remember: These tests are designed to fail initially.');
+    console.log('Implement the production code to make them pass (TDD workflow).');
+    
+  } catch (error) {
+    // Handle unexpected errors
+    if (error instanceof Error) {
+      console.error(`\nError: ${error.message}`);
+      if (process.env.DEBUG) {
+        console.error(error.stack);
+      }
+    } else {
+      console.error('\nAn unexpected error occurred.');
+    }
     process.exit(1);
   }
-  
-  // TODO: The actual generation logic will be implemented in later tasks
-  // For now, output a placeholder message
-  console.log('Processing user story...');
-  console.log(`Story: ${storyText}`);
-  
-  if (options.output) {
-    console.log(`Output directory: ${options.output}`);
-  }
-  
-  if (options.interactive) {
-    console.log('Interactive mode enabled');
-  }
-  
-  if (options.model) {
-    console.log(`Using AI model: ${options.model}`);
-  }
-  
-  console.log('\nTest generation will be implemented in subsequent tasks.');
 }
 
 /**

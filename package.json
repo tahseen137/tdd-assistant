@@ -3,16 +3,23 @@
   "version": "1.0.0",
   "description": "CLI tool that generates JUnit 5 test scaffolds from user stories for Java/Spring Boot projects",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "tdd-assistant": "./dist/cli/index.js"
   },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli/index.js",
     "dev": "ts-node src/cli/index.ts",
     "test": "jest",
     "test:watch": "jest --watch",
-    "lint": "eslint src/**/*.ts"
+    "lint": "eslint src/**/*.ts",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "tdd",
@@ -21,10 +28,20 @@
     "java",
     "spring-boot",
     "test-generation",
-    "cli"
+    "cli",
+    "ai",
+    "openai",
+    "unit-testing"
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "commander": "^12.1.0",
     "openai": "^4.52.0"
