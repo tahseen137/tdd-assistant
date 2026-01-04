@@ -21,6 +21,7 @@ import {
   createCriteriaMatcher,
   createValidationReporter,
   createValidationReport,
+  createValidationInteractiveSession,
   ReportFormat,
   ValidateCLIOptions
 } from '../validator';
@@ -559,11 +560,38 @@ export async function handleValidateCommand(options: ValidateCLIOptions): Promis
       matches
     );
     
-    // Step 10: Output the report
+    // Step 10: Output the report (or enter interactive mode)
     const reporter = createValidationReporter();
     const format = (options.format || 'console') as ReportFormat;
     
-    if (options.output) {
+    // Interactive mode - Requirement: 10.1, 10.2, 10.3, 10.4, 10.5
+    if (options.interactive) {
+      console.log('\nEntering interactive validation mode...');
+      const interactiveSession = createValidationInteractiveSession();
+      
+      const result = await interactiveSession.review(report);
+      
+      if (result.cancelled) {
+        console.log('Validation review cancelled.');
+        process.exit(0);
+      }
+      
+      // Use the potentially modified report (with manual verifications)
+      const finalReport = result.report;
+      
+      if (options.output) {
+        await reporter.writeToFile(finalReport, options.output, format);
+        console.log(`\nValidation report written to: ${options.output}`);
+      }
+      
+      // Show final summary
+      console.log('\n--- Final Summary ---');
+      console.log(`Overall Status: ${finalReport.summary.overallStatus.toUpperCase()}`);
+      console.log(`Coverage: ${finalReport.summary.coveragePercentage.toFixed(1)}%`);
+      console.log(`Covered: ${finalReport.summary.covered}/${finalReport.summary.totalCriteria}`);
+      console.log(`Partially Covered: ${finalReport.summary.partiallyCovered}`);
+      console.log(`Not Covered: ${finalReport.summary.notCovered}`);
+    } else if (options.output) {
       // Write to file
       await reporter.writeToFile(report, options.output, format);
       console.log(`\nValidation report written to: ${options.output}`);
