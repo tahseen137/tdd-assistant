@@ -5,12 +5,14 @@ A CLI tool that generates JUnit 5 test scaffolds from user stories for Java/Spri
 ## Features
 
 - **AI-Powered Test Generation**: Uses OpenAI to analyze user stories and extract meaningful test cases
+- **Story Validation**: Validate implementation code against user story acceptance criteria
 - **JUnit 5 Support**: Generates tests with proper JUnit 5 annotations (@Test, @BeforeEach, @DisplayName)
 - **Spring Boot Integration**: Includes @SpringBootTest, @MockBean annotations when appropriate
 - **Multiple Naming Conventions**: Supports `should`, `given_when_then`, and `test` naming patterns
 - **Interactive Mode**: Review and select which test cases to generate before output
 - **Flexible Configuration**: Configure via JSON file or CLI flags
 - **Multiple Input Methods**: Provide user stories directly or from a file
+- **Multiple Output Formats**: Generate validation reports in console, JSON, or Markdown format
 
 ## Installation
 
@@ -87,6 +89,93 @@ tdd-assistant generate --story "..." --naming-convention given_when_then
 
 # Interactive mode (review and select test cases)
 tdd-assistant generate --story "..." --interactive
+```
+
+### Validate Implementation
+
+Validate your implementation code against a user story to check acceptance criteria coverage:
+
+```bash
+# Validate a single file against a story
+tdd-assistant validate --story "As a user, I want to login, so that I can access my account" --code src/main/java/UserService.java
+
+# Validate from story file
+tdd-assistant validate --file user-story.txt --code src/main/java/
+
+# Recursively scan directory
+tdd-assistant validate --story "..." --code src/main/java/ --recursive
+
+# Output as JSON
+tdd-assistant validate --story "..." --code src/ --format json --output report.json
+
+# Output as Markdown
+tdd-assistant validate --story "..." --code src/ --format markdown --output report.md
+```
+
+### Validate Command Options
+
+| Option | Description |
+|--------|-------------|
+| `--story <story>` | User story text to validate against |
+| `--file <path>` | Path to file containing the user story |
+| `--code <path>` | (Required) Path to code file or directory to validate |
+| `--recursive` | Scan directory recursively for source files |
+| `--format <format>` | Output format: console (default), json, or markdown |
+| `--output <path>` | Output file path for the validation report |
+| `--interactive` | Enable interactive mode to review results |
+| `--config <path>` | Path to configuration file |
+| `--model <model>` | AI model to use |
+
+### Example Validation Output
+
+```
+═══════════════════════════════════════════════════════════════
+                    VALIDATION REPORT
+═══════════════════════════════════════════════════════════════
+
+📖 STORY SUMMARY
+───────────────────────────────────────────────────────────────
+  Role:    user
+  Feature: login with email and password
+  Benefit: I can access my account
+
+📊 COVERAGE SUMMARY
+───────────────────────────────────────────────────────────────
+  Overall Status: PARTIAL
+  Coverage:       66.7%
+
+  ✓ Covered:          2
+  ◐ Partially Covered: 1
+  ✗ Not Covered:       0
+  Total Criteria:    3
+
+📋 CRITERIA DETAILS
+───────────────────────────────────────────────────────────────
+
+  ✓ AC-1: User can login with valid credentials
+    Status: covered (85% confidence)
+    Type: happy_path
+    Evidence:
+      • UserService.authenticate
+        Method validates email and password
+
+  ◐ AC-2: System displays error for invalid credentials
+    Status: partially_covered (60% confidence)
+    Type: error
+    Evidence:
+      • UserService.authenticate
+        Throws exception on invalid credentials
+    Suggestions:
+      → Add user-friendly error message display
+
+  ✓ AC-3: User session is created after successful login
+    Status: covered (90% confidence)
+    Type: functional
+    Evidence:
+      • SessionManager.createSession
+        Creates session with user ID
+
+═══════════════════════════════════════════════════════════════
 ```
 
 ### CLI Options
