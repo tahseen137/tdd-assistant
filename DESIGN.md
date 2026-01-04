@@ -4,6 +4,8 @@
 
 TDD Assistant is a Node.js CLI tool that generates JUnit 5 test scaffolds from user stories for Java/Spring Boot projects. It uses OpenAI's API to intelligently parse user stories and extract test cases, then generates well-formatted test files that follow TDD principles (tests that fail initially).
 
+Additionally, TDD Assistant provides a validation feature that analyzes existing implementation code against user stories to verify that all acceptance criteria are satisfied, generating coverage reports that help developers identify gaps in their implementation.
+
 The tool is designed to be portable (runs anywhere Node.js is installed), configurable, and developer-friendly with both batch and interactive modes.
 
 ## Architecture
@@ -12,6 +14,9 @@ The tool is designed to be portable (runs anywhere Node.js is installed), config
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLI Layer                                │
 │  (Commander.js - handles commands, flags, and user interaction) │
+│  ┌──────────────────┐  ┌──────────────────┐                     │
+│  │ generate command │  │ validate command │                     │
+│  └──────────────────┘  └──────────────────┘                     │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -21,18 +26,25 @@ The tool is designed to be portable (runs anywhere Node.js is installed), config
 │  │   Config    │  │   Story     │  │      Test Generator     │ │
 │  │   Loader    │  │   Parser    │  │   (Java/Spring Boot)    │ │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │    Code     │  │  Criteria   │  │     Validation          │ │
+│  │   Analyzer  │  │   Matcher   │  │     Reporter            │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      AI Service Layer                            │
 │              (OpenAI API integration)                            │
+│  ┌──────────────────────┐  ┌──────────────────────┐            │
+│  │ Test Case Extraction │  │ Code-Criteria Match  │            │
+│  └──────────────────────┘  └──────────────────────┘            │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Output Layer                                │
-│  (File writer / stdout - generates .java test files)            │
+│  (File writer / stdout - generates .java test files & reports)  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -149,6 +161,127 @@ interface OutputWriter {
 }
 ```
 
+### 7. Code Analyzer (`src/validator/code-analyzer.ts`)
+
+Analyzes source code files to extract structure and logic.
+
+```typescript
+interface SourceFile {
+  path: string;
+  content: string;
+  language: 'java' | 'typescript' | 'javascript';
+}
+
+interface CodeStructure {
+  classes: ClassInfo[];
+  methods: MethodInfo[];
+  imports: string[];
+  annotations: string[];
+}
+
+interface CodeAnalyzer {
+  analyzeFile(filePath: string): Promise<SourceFile>;
+  analyzeDirectory(dirPath: string, recursive: boolean): Promise<SourceFile[]>;
+  extractStructure(source: SourceFile): CodeStructure;
+}
+```
+
+### 8. Criteria Extractor (`src/validator/criteria-extractor.ts`)
+
+Extracts acceptance criteria from user stories.
+
+```typescript
+interface AcceptanceCriterion {
+  id: string;                    // "AC-1", "AC-2", etc.
+  description: string;           // The criterion text
+  type: CriterionType;           // happy_path, error, edge_case, boundary
+  keywords: string[];            // Key terms for matching
+}
+
+interface CriteriaExtractor {
+  extract(story: UserStory): Promise<AcceptanceCriterion[]>;
+  parseFromText(text: string): AcceptanceCriterion[];
+}
+```
+
+### 9. Criteria Matcher (`src/validator/criteria-matcher.ts`)
+
+Matches acceptance criteria to code implementations using AI.
+
+```typescript
+interface CriterionMatch {
+  criterion: AcceptanceCriterion;
+  status: CoverageStatus;
+  evidence: CodeEvidence[];
+  confidence: number;            // 0-100 confidence score
+  suggestions?: string[];        // Suggestions if not fully covered
+}
+
+type CoverageStatus = 'covered' | 'partially_covered' | 'not_covered';
+
+interface CriteriaMatcher {
+  match(
+    criteria: AcceptanceCriterion[],
+    codeStructures: CodeStructure[],
+    sourceFiles: SourceFile[]
+  ): Promise<CriterionMatch[]>;
+}
+```
+
+### 10. Validation Reporter (`src/validator/validation-reporter.ts`)
+
+Generates validation reports in various formats.
+
+```typescript
+interface ValidationReport {
+  story: UserStorySummary;
+  criteria: CriterionMatch[];
+  summary: ValidationSummary;
+  generatedAt: Date;
+}
+
+interface ValidationSummary {
+  totalCriteria: number;
+  covered: number;
+  partiallyCovered: number;
+  notCovered: number;
+  coveragePercentage: number;
+  overallStatus: 'pass' | 'partial' | 'fail';
+}
+
+type ReportFormat = 'console' | 'json' | 'markdown';
+
+interface ValidationReporter {
+  generate(report: ValidationReport, format: ReportFormat): string;
+  writeToFile(report: ValidationReport, filePath: string, format: ReportFormat): Promise<void>;
+  writeToConsole(report: ValidationReport): void;
+}
+```
+
+### 11. Validation Interactive Mode (`src/validator/validation-interactive.ts`)
+
+Handles interactive review of validation results.
+
+```typescript
+interface InteractiveValidationState {
+  report: ValidationReport;
+  manuallyVerified: Set<string>;
+  currentIndex: number;
+  modified: boolean;
+}
+
+interface InteractiveValidationResult {
+  report: ValidationReport;
+  saved: boolean;
+  cancelled: boolean;
+}
+
+interface ValidationInteractiveSession {
+  review(report: ValidationReport): Promise<InteractiveValidationResult>;
+  close(): void;
+}
+```
+
 ## Data Models
 
 ### User Story Model
@@ -191,6 +324,23 @@ interface TDDAssistantConfig {
 
 type NamingConvention = 'should' | 'given_when_then' | 'test';
 ```
+
+### Validation CLI Options Model
+
+```typescript
+interface ValidateCLIOptions {
+  story?: string;
+  file?: string;
+  code: string;                     // Required: path to code file or directory
+  recursive?: boolean;              // Scan directory recursively
+  format?: 'console' | 'json' | 'markdown';
+  output?: string;                  // Output file path for report
+  interactive?: boolean;
+  config?: string;
+  model?: string;
+}
+```
+
 
 ## Correctness Properties
 
@@ -260,6 +410,57 @@ type NamingConvention = 'should' | 'given_when_then' | 'test';
 
 **Validates: Requirements 7.4**
 
+### Property 10: Acceptance Criteria Extraction Completeness
+
+*For any* user story with explicitly listed acceptance criteria, the criteria extractor should identify and return all listed criteria as separate AcceptanceCriterion objects.
+
+**Validates: Requirements 8.4**
+
+### Property 11: Validation Report Criteria Count Consistency
+
+*For any* validation run, the sum of covered + partially_covered + not_covered criteria in the report should equal the total number of extracted acceptance criteria.
+
+**Validates: Requirements 8.7, 8.11**
+
+### Property 12: Coverage Status Mutual Exclusivity
+
+*For any* criterion in a validation report, the status should be exactly one of: 'covered', 'partially_covered', or 'not_covered' - never multiple or none.
+
+**Validates: Requirements 8.8, 8.9, 8.10**
+
+### Property 13: Evidence Requirement for Covered Criteria
+
+*For any* criterion marked as 'covered' or 'partially_covered', the validation report should include at least one CodeEvidence object with a non-empty snippet and explanation.
+
+**Validates: Requirements 8.8, 8.9**
+
+### Property 14: Suggestions Requirement for Uncovered Criteria
+
+*For any* criterion marked as 'not_covered', the validation report should include at least one implementation suggestion.
+
+**Validates: Requirements 8.10**
+
+### Property 15: Coverage Percentage Calculation Accuracy
+
+*For any* validation report, the coveragePercentage should equal (covered + 0.5 * partiallyCovered) / totalCriteria * 100, rounded to one decimal place.
+
+**Validates: Requirements 8.11**
+
+### Property 16: Report Format Output Validity
+
+*For any* validation report output:
+- JSON format should be valid parseable JSON
+- Markdown format should contain proper heading structure
+- Console format should include colored status indicators
+
+**Validates: Requirements 9.1, 9.2, 9.3**
+
+### Property 17: Recursive File Discovery
+
+*For any* directory path with the --recursive flag, the code analyzer should discover all source files matching supported extensions (.java, .ts, .js) in all subdirectories.
+
+**Validates: Requirements 8.3**
+
 ## Error Handling
 
 | Error Scenario | Handling Strategy |
@@ -270,6 +471,12 @@ type NamingConvention = 'should' | 'given_when_then' | 'test';
 | Invalid output directory | Create directory if possible, otherwise error |
 | File write permission denied | Display error with suggested fix |
 | Invalid config file | Show validation errors with line numbers |
+| Code path not found | Display error with valid path suggestion |
+| No source files found | Display warning and suggest checking path/extensions |
+| Unsupported file type | Skip file with warning, continue with supported files |
+| Code parsing error | Log warning, continue with partial analysis |
+| No acceptance criteria found | Prompt user to add criteria or use AI to infer them |
+| AI matching timeout | Return partial results with timeout warning |
 
 ## Testing Strategy
 
@@ -280,6 +487,10 @@ type NamingConvention = 'should' | 'given_when_then' | 'test';
 - Test configuration loading and merging
 - Test Java code generation formatting
 - Test file path construction from package names
+- Test code analyzer with various Java/TypeScript file structures
+- Test criteria extraction from different story formats
+- Test validation report generation in all formats
+- Test coverage percentage calculations
 
 ### Property-Based Tests
 
@@ -294,13 +505,23 @@ Using fast-check library for property-based testing:
 - **Property 7**: Code formatting consistency - verify import order, comments, indentation
 - **Property 8**: Invalid command error handling - generate invalid commands and verify errors
 - **Property 9**: Selected test case generation - verify output matches selection count
+- **Property 10**: Acceptance criteria extraction completeness - verify all criteria extracted
+- **Property 11**: Validation report criteria count consistency - verify sum equals total
+- **Property 12**: Coverage status mutual exclusivity - verify exactly one status per criterion
+- **Property 13**: Evidence requirement for covered criteria - verify evidence exists
+- **Property 14**: Suggestions requirement for uncovered criteria - verify suggestions exist
+- **Property 15**: Coverage percentage calculation accuracy - verify formula correctness
+- **Property 16**: Report format output validity - verify format-specific requirements
+- **Property 17**: Recursive file discovery - verify all files found in subdirectories
 
 ### Integration Tests
 
 - End-to-end test: story input → test file output
+- End-to-end test: story + code → validation report
 - AI service integration with mock responses
 - File system operations
 - Config file loading
+- Validation with real Java/TypeScript projects
 
 ### Test Framework
 

@@ -20,6 +20,7 @@ export {
 // Criteria Extractor
 export {
   CriteriaExtractor,
+  CriteriaExtractorConfig,
   createCriteriaExtractor,
   generateCriterionId,
   inferCriterionType,
@@ -29,6 +30,7 @@ export {
 // Criteria Matcher
 export {
   CriteriaMatcher,
+  CriteriaMatcherConfig,
   createCriteriaMatcher,
   createCoveredMatch,
   createPartiallyCoveredMatch,
@@ -40,6 +42,7 @@ export {
 // Validation Reporter
 export {
   ValidationReporter,
+  ValidationReporterConfig,
   createValidationReporter,
   calculateSummary,
   createValidationReport,
@@ -48,3 +51,18 @@ export {
   getStatusEmoji,
   formatCoveragePercentage
 } from './validation-reporter';
+
+// Validation Interactive Mode
+export {
+  ValidationInteractiveSession,
+  InteractiveValidationState,
+  InteractiveValidationResult,
+  createValidationInteractiveSession,
+  formatCriterionDisplay,
+  displayValidationSummary,
+  displayCriterionDetails,
+  parseViewCommand,
+  parseVerifyCommand,
+  parseUnverifyCommand,
+  applyManualVerifications
+} from './validation-interactive';

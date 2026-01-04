@@ -3,7 +3,7 @@
  * TDD Assistant CLI Entry Point
  * Handles command-line interface using Commander.js
  * 
- * Requirements: 1.1, 1.2, 1.3, 1.4, 1.5
+ * Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 8.1, 8.2, 8.3
  */
 
 import { Command } from 'commander';
@@ -15,6 +15,16 @@ import { createAIService, APIKeyNotConfiguredError, AIServiceUnavailableError, T
 import { createJavaTestGenerator, deriveClassName } from '../generator/java-generator';
 import { createOutputWriter } from '../output/writer';
 import { createInteractiveSession } from '../interactive/index';
+import { 
+  createCodeAnalyzer,
+  createCriteriaExtractor,
+  createCriteriaMatcher,
+  createValidationReporter,
+  createValidationReport,
+  createValidationInteractiveSession,
+  ReportFormat,
+  ValidateCLIOptions
+} from '../validator';
 
 /**
  * CLI Options interface for the generate command
@@ -60,6 +70,46 @@ export function validateStorySource(options: CLIOptions): CLIValidationResult {
 }
 
 /**
+ * Validates validate command options
+ * Requirement: 8.1, 8.2
+ */
+export function validateValidateOptions(options: ValidateCLIOptions): CLIValidationResult {
+  // Code path is required
+  if (!options.code) {
+    return {
+      isValid: false,
+      error: 'Error: You must provide --code option with path to code file or directory.\n\nUsage: tdd-assistant validate --story "<user story>" --code <path>'
+    };
+  }
+  
+  // Must have either story or file
+  if (!options.story && !options.file) {
+    return {
+      isValid: false,
+      error: 'Error: You must provide either --story or --file option.\n\nUsage: tdd-assistant validate --story "<user story>" --code <path>'
+    };
+  }
+  
+  // Cannot have both story and file
+  if (options.story && options.file) {
+    return {
+      isValid: false,
+      error: 'Error: Cannot use both --story and --file options together. Please provide only one.\n\nUsage: tdd-assistant validate --story "<user story>" --code <path>'
+    };
+  }
+  
+  // Validate format option
+  if (options.format && !['console', 'json', 'markdown'].includes(options.format)) {
+    return {
+      isValid: false,
+      error: `Error: Invalid format '${options.format}'. Use: console, json, or markdown`
+    };
+  }
+  
+  return { isValid: true };
+}
+
+/**
  * Validates that the file exists and is readable
  */
 export function validateFileExists(filePath: string): CLIValidationResult {
@@ -78,6 +128,22 @@ export function validateFileExists(filePath: string): CLIValidationResult {
     return {
       isValid: false,
       error: `Error: Cannot read file: ${filePath}\n\nPlease check file permissions.`
+    };
+  }
+  
+  return { isValid: true };
+}
+
+/**
+ * Validates that the path exists (file or directory)
+ */
+export function validatePathExists(codePath: string): CLIValidationResult {
+  const resolvedPath = path.resolve(codePath);
+  
+  if (!fs.existsSync(resolvedPath)) {
+    return {
+      isValid: false,
+      error: `Error: Path not found: ${codePath}\n\nPlease provide a valid file or directory path.`
     };
   }
   
@@ -126,6 +192,23 @@ export function createProgram(): Command {
     .option('-n, --naming-convention <convention>', 'Test naming convention: should, given_when_then, or test')
     .action(async (options: CLIOptions) => {
       await handleGenerateCommand(options);
+    });
+  
+  // Validate command - Requirements: 8.1, 8.2, 8.3
+  program
+    .command('validate')
+    .description('Validate implementation code against a user story')
+    .option('-s, --story <story>', 'User story text to validate against')
+    .option('-f, --file <path>', 'Path to a file containing the user story')
+    .requiredOption('--code <path>', 'Path to code file or directory to validate')
+    .option('-r, --recursive', 'Scan directory recursively for source files', false)
+    .option('--format <format>', 'Output format: console, json, or markdown', 'console')
+    .option('-o, --output <path>', 'Output file path for the validation report')
+    .option('-i, --interactive', 'Enable interactive mode to review validation results', false)
+    .option('-c, --config <path>', 'Path to configuration file')
+    .option('-m, --model <model>', 'AI model to use (e.g., gpt-4, gpt-3.5-turbo)')
+    .action(async (options: ValidateCLIOptions) => {
+      await handleValidateCommand(options);
     });
   
   // Handle unknown commands
@@ -331,6 +414,210 @@ export async function handleGenerateCommand(options: CLIOptions): Promise<void> 
     
   } catch (error) {
     // Handle unexpected errors
+    if (error instanceof Error) {
+      console.error(`\nError: ${error.message}`);
+      if (process.env.DEBUG) {
+        console.error(error.stack);
+      }
+    } else {
+      console.error('\nAn unexpected error occurred.');
+    }
+    process.exit(1);
+  }
+}
+
+/**
+ * Handles the validate command execution
+ * Connects CLI → Config → Parser → CodeAnalyzer → CriteriaExtractor → CriteriaMatcher → Reporter
+ * Requirements: 8.1, 8.2, 8.7
+ */
+export async function handleValidateCommand(options: ValidateCLIOptions): Promise<void> {
+  try {
+    // Step 1: Validate options
+    const optionsValidation = validateValidateOptions(options);
+    if (!optionsValidation.isValid) {
+      console.error(optionsValidation.error);
+      process.exit(1);
+    }
+    
+    // Step 2: Validate code path exists
+    const pathValidation = validatePathExists(options.code);
+    if (!pathValidation.isValid) {
+      console.error(pathValidation.error);
+      process.exit(1);
+    }
+    
+    // Step 3: Get the user story text
+    let storyText: string;
+    
+    if (options.file) {
+      const fileValidation = validateFileExists(options.file);
+      if (!fileValidation.isValid) {
+        console.error(fileValidation.error);
+        process.exit(1);
+      }
+      
+      storyText = readStoryFromFile(options.file);
+      
+      if (!storyText) {
+        console.error('Error: The specified story file is empty.\n\nPlease provide a file with a valid user story.');
+        process.exit(1);
+      }
+    } else {
+      storyText = options.story!;
+    }
+    
+    // Validate story is not empty
+    if (!storyText.trim()) {
+      console.error('Error: User story cannot be empty.\n\nUsage: tdd-assistant validate --story "<user story>" --code <path>');
+      process.exit(1);
+    }
+    
+    // Step 4: Load configuration
+    console.log('Loading configuration...');
+    const configLoader = new ConfigLoader();
+    const cliOverrides: PartialConfig = {};
+    
+    if (options.model) {
+      cliOverrides.aiModel = options.model;
+    }
+    
+    const configResult = configLoader.load(cliOverrides, options.config);
+    const config = configResult.config;
+    
+    if (configResult.source === 'file') {
+      console.log(`Using configuration from: ${configResult.filePath}`);
+    }
+    
+    // Step 5: Parse the user story
+    console.log('Parsing user story...');
+    const storyParser = createStoryParser();
+    const userStory: UserStory = storyParser.parse(storyText);
+    
+    console.log(`  Role: ${userStory.role || '(not specified)'}`);
+    console.log(`  Feature: ${userStory.feature || '(not specified)'}`);
+    console.log(`  Benefit: ${userStory.benefit || '(not specified)'}`);
+    
+    // Step 6: Analyze code files
+    console.log('\nAnalyzing code files...');
+    const codeAnalyzer = createCodeAnalyzer();
+    
+    const resolvedCodePath = path.resolve(options.code);
+    const isDirectory = fs.statSync(resolvedCodePath).isDirectory();
+    
+    let sourceFiles;
+    if (isDirectory) {
+      sourceFiles = await codeAnalyzer.analyzeDirectory(resolvedCodePath, options.recursive || false);
+    } else {
+      sourceFiles = [await codeAnalyzer.analyzeFile(resolvedCodePath)];
+    }
+    
+    if (sourceFiles.length === 0) {
+      console.error('\nError: No source files found at the specified path.');
+      console.error('Supported file types: .java, .ts, .tsx, .js, .jsx');
+      process.exit(1);
+    }
+    
+    console.log(`  Found ${sourceFiles.length} source file(s)`);
+    
+    // Extract code structures
+    const codeStructures = sourceFiles.map(sf => codeAnalyzer.extractStructure(sf));
+    
+    // Step 7: Extract acceptance criteria
+    console.log('\nExtracting acceptance criteria...');
+    const criteriaExtractor = createCriteriaExtractor({
+      apiKey: config.apiKey,
+      model: config.aiModel
+    });
+    
+    const criteria = await criteriaExtractor.extract(userStory);
+    console.log(`  Found ${criteria.length} acceptance criteria`);
+    
+    if (criteria.length === 0) {
+      console.error('\nError: No acceptance criteria could be extracted from the user story.');
+      console.error('Please provide a more detailed user story with explicit acceptance criteria.');
+      process.exit(1);
+    }
+    
+    // Step 8: Match criteria to code
+    console.log('\nMatching criteria to code...');
+    const criteriaMatcher = createCriteriaMatcher({
+      apiKey: config.apiKey,
+      model: config.aiModel
+    });
+    
+    const matches = await criteriaMatcher.match(criteria, codeStructures, sourceFiles);
+    
+    // Step 9: Generate validation report
+    console.log('\nGenerating validation report...');
+    const report = createValidationReport(
+      {
+        role: userStory.role,
+        feature: userStory.feature,
+        benefit: userStory.benefit,
+        totalCriteria: criteria.length
+      },
+      matches
+    );
+    
+    // Step 10: Output the report (or enter interactive mode)
+    const reporter = createValidationReporter();
+    const format = (options.format || 'console') as ReportFormat;
+    
+    // Interactive mode - Requirement: 10.1, 10.2, 10.3, 10.4, 10.5
+    if (options.interactive) {
+      console.log('\nEntering interactive validation mode...');
+      const interactiveSession = createValidationInteractiveSession();
+      
+      const result = await interactiveSession.review(report);
+      
+      if (result.cancelled) {
+        console.log('Validation review cancelled.');
+        process.exit(0);
+      }
+      
+      // Use the potentially modified report (with manual verifications)
+      const finalReport = result.report;
+      
+      if (options.output) {
+        await reporter.writeToFile(finalReport, options.output, format);
+        console.log(`\nValidation report written to: ${options.output}`);
+      }
+      
+      // Show final summary
+      console.log('\n--- Final Summary ---');
+      console.log(`Overall Status: ${finalReport.summary.overallStatus.toUpperCase()}`);
+      console.log(`Coverage: ${finalReport.summary.coveragePercentage.toFixed(1)}%`);
+      console.log(`Covered: ${finalReport.summary.covered}/${finalReport.summary.totalCriteria}`);
+      console.log(`Partially Covered: ${finalReport.summary.partiallyCovered}`);
+      console.log(`Not Covered: ${finalReport.summary.notCovered}`);
+    } else if (options.output) {
+      // Write to file
+      await reporter.writeToFile(report, options.output, format);
+      console.log(`\nValidation report written to: ${options.output}`);
+      
+      // Also show summary to console
+      console.log('\n--- Summary ---');
+      console.log(`Overall Status: ${report.summary.overallStatus.toUpperCase()}`);
+      console.log(`Coverage: ${report.summary.coveragePercentage.toFixed(1)}%`);
+      console.log(`Covered: ${report.summary.covered}/${report.summary.totalCriteria}`);
+      console.log(`Partially Covered: ${report.summary.partiallyCovered}`);
+      console.log(`Not Covered: ${report.summary.notCovered}`);
+    } else {
+      // Write to console
+      reporter.writeToConsole(report);
+    }
+    
+  } catch (error) {
+    // Handle unexpected errors
+    if (error instanceof APIKeyNotConfiguredError) {
+      console.error('\n' + error.message);
+      process.exit(1);
+    }
+    if (error instanceof AIServiceUnavailableError) {
+      console.error('\n' + error.message);
+      process.exit(1);
+    }
     if (error instanceof Error) {
       console.error(`\nError: ${error.message}`);
       if (process.env.DEBUG) {
