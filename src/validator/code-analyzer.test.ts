@@ -284,3 +284,219 @@ describe('SUPPORTED_EXTENSIONS', () => {
     expect(SUPPORTED_EXTENSIONS).toContain('.jsx');
   });
 });
+
+/**
+ * Property-Based Tests for Code Analyzer
+ * 
+ * Feature: tdd-assistant, Property 17: Recursive File Discovery
+ * Validates: Requirements 8.3
+ */
+import * as fc from 'fast-check';
+
+describe('Property-Based Tests: Recursive File Discovery', () => {
+  let tempDir: string;
+  
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pbt-code-analyzer-'));
+  });
+  
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+  
+  /**
+   * Feature: tdd-assistant, Property 17: Recursive File Discovery
+   * Validates: Requirements 8.3
+   * 
+   * For any directory path with the --recursive flag, the code analyzer should 
+   * discover all source files matching supported extensions (.java, .ts, .js) 
+   * in all subdirectories.
+   */
+  it('Property 17: should discover all source files in all subdirectories when recursive is true', async () => {
+    // Arbitrary for generating valid file names (alphanumeric, starting with letter)
+    const fileNameArb = fc.stringOf(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz'), { minLength: 1, maxLength: 10 })
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1));
+    
+    // Arbitrary for supported extensions
+    const supportedExtArb = fc.constantFrom('.java', '.ts', '.js');
+    
+    // Arbitrary for unsupported extensions
+    const unsupportedExtArb = fc.constantFrom('.txt', '.md', '.py', '.css', '.html');
+    
+    // Arbitrary for directory depth (1-3 levels)
+    const depthArb = fc.integer({ min: 1, max: 3 });
+    
+    // Arbitrary for number of files per directory (0-3)
+    const filesPerDirArb = fc.integer({ min: 0, max: 3 });
+    
+    // Arbitrary for directory structure
+    const dirStructureArb = fc.record({
+      depth: depthArb,
+      filesPerLevel: fc.array(filesPerDirArb, { minLength: 1, maxLength: 4 }),
+      supportedFiles: fc.array(
+        fc.record({
+          name: fileNameArb,
+          ext: supportedExtArb,
+          level: fc.integer({ min: 0, max: 3 })
+        }),
+        { minLength: 1, maxLength: 10 }
+      ),
+      unsupportedFiles: fc.array(
+        fc.record({
+          name: fileNameArb,
+          ext: unsupportedExtArb,
+          level: fc.integer({ min: 0, max: 3 })
+        }),
+        { minLength: 0, maxLength: 5 }
+      )
+    });
+    
+    await fc.assert(
+      fc.asyncProperty(dirStructureArb, async (structure) => {
+        // Create directory structure
+        const createdDirs: string[] = [tempDir];
+        const maxDepth = Math.min(structure.depth, 3);
+        
+        // Create nested directories
+        let currentDir = tempDir;
+        for (let i = 0; i < maxDepth; i++) {
+          const subDir = path.join(currentDir, `level${i + 1}`);
+          fs.mkdirSync(subDir, { recursive: true });
+          createdDirs.push(subDir);
+          currentDir = subDir;
+        }
+        
+        // Track expected supported files
+        const expectedSupportedFiles: string[] = [];
+        
+        // Create supported source files at various levels
+        for (const file of structure.supportedFiles) {
+          const level = Math.min(file.level, createdDirs.length - 1);
+          const targetDir = createdDirs[level];
+          const fileName = `${file.name}${file.ext}`;
+          const filePath = path.join(targetDir, fileName);
+          
+          // Avoid duplicate file names in same directory
+          if (!fs.existsSync(filePath)) {
+            fs.writeFileSync(filePath, `// ${fileName} content`);
+            expectedSupportedFiles.push(filePath);
+          }
+        }
+        
+        // Create unsupported files (should be ignored)
+        for (const file of structure.unsupportedFiles) {
+          const level = Math.min(file.level, createdDirs.length - 1);
+          const targetDir = createdDirs[level];
+          const fileName = `${file.name}${file.ext}`;
+          const filePath = path.join(targetDir, fileName);
+          
+          if (!fs.existsSync(filePath)) {
+            fs.writeFileSync(filePath, `${fileName} content`);
+          }
+        }
+        
+        // Run the analyzer with recursive=true
+        const analyzer = createCodeAnalyzer();
+        const results = await analyzer.analyzeDirectory(tempDir, true);
+        
+        // Property: All discovered files should have supported extensions
+        const allHaveSupportedExtensions = results.every(r => 
+          isSupportedSourceFile(r.path)
+        );
+        
+        // Property: All expected supported files should be discovered
+        const discoveredPaths = new Set(results.map(r => r.path));
+        const allExpectedFound = expectedSupportedFiles.every(f => 
+          discoveredPaths.has(f)
+        );
+        
+        // Property: No unsupported files should be discovered
+        const noUnsupportedFiles = results.every(r => {
+          const ext = path.extname(r.path).toLowerCase();
+          return ['.java', '.ts', '.tsx', '.js', '.jsx'].includes(ext);
+        });
+        
+        // Property: Number of discovered files should match expected supported files
+        const countMatches = results.length === expectedSupportedFiles.length;
+        
+        // Clean up for next iteration
+        for (let i = createdDirs.length - 1; i >= 1; i--) {
+          fs.rmSync(createdDirs[i], { recursive: true, force: true });
+        }
+        // Clean root level files
+        const rootEntries = fs.readdirSync(tempDir);
+        for (const entry of rootEntries) {
+          fs.rmSync(path.join(tempDir, entry), { recursive: true, force: true });
+        }
+        
+        return allHaveSupportedExtensions && allExpectedFound && noUnsupportedFiles && countMatches;
+      }),
+      { numRuns: 100 }
+    );
+  });
+  
+  /**
+   * Feature: tdd-assistant, Property 17: Recursive File Discovery (Non-recursive comparison)
+   * Validates: Requirements 8.3
+   * 
+   * For any directory with subdirectories, recursive=true should find >= files than recursive=false
+   */
+  it('Property 17: recursive search should find at least as many files as non-recursive', async () => {
+    const fileNameArb = fc.stringOf(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz'), { minLength: 1, maxLength: 8 })
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1));
+    
+    const extArb = fc.constantFrom('.java', '.ts', '.js');
+    
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.record({ name: fileNameArb, ext: extArb }), { minLength: 1, maxLength: 5 }),
+        fc.array(fc.record({ name: fileNameArb, ext: extArb }), { minLength: 0, maxLength: 5 }),
+        async (rootFiles, nestedFiles) => {
+          // Create root level files
+          const createdRootFiles: string[] = [];
+          for (const file of rootFiles) {
+            const fileName = `${file.name}${file.ext}`;
+            const filePath = path.join(tempDir, fileName);
+            if (!fs.existsSync(filePath)) {
+              fs.writeFileSync(filePath, `// ${fileName}`);
+              createdRootFiles.push(filePath);
+            }
+          }
+          
+          // Create nested directory with files
+          const subDir = path.join(tempDir, 'nested');
+          fs.mkdirSync(subDir, { recursive: true });
+          
+          const createdNestedFiles: string[] = [];
+          for (const file of nestedFiles) {
+            const fileName = `${file.name}${file.ext}`;
+            const filePath = path.join(subDir, fileName);
+            if (!fs.existsSync(filePath)) {
+              fs.writeFileSync(filePath, `// ${fileName}`);
+              createdNestedFiles.push(filePath);
+            }
+          }
+          
+          const analyzer = createCodeAnalyzer();
+          
+          const [nonRecursiveResults, recursiveResults] = await Promise.all([
+            analyzer.analyzeDirectory(tempDir, false),
+            analyzer.analyzeDirectory(tempDir, true)
+          ]);
+          
+          // Clean up for next iteration
+          fs.rmSync(subDir, { recursive: true, force: true });
+          for (const filePath of createdRootFiles) {
+            if (fs.existsSync(filePath)) {
+              fs.rmSync(filePath);
+            }
+          }
+          
+          // Property: Recursive should find >= files than non-recursive
+          return recursiveResults.length >= nonRecursiveResults.length;
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+});
