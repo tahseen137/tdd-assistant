@@ -1,0 +1,41 @@
+{
+  "name": "tdd-assistant",
+  "version": "1.0.0",
+  "description": "CLI tool that generates JUnit 5 test scaffolds from user stories for Java/Spring Boot projects",
+  "main": "dist/index.js",
+  "bin": {
+    "tdd-assistant": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "dev": "ts-node src/cli/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.ts"
+  },
+  "keywords": [
+    "tdd",
+    "test-driven-development",
+    "junit",
+    "java",
+    "spring-boot",
+    "test-generation",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "openai": "^4.52.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.9",
+    "fast-check": "^3.19.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.2"
+  }
+}
