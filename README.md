@@ -110,6 +110,9 @@ tdd-assistant validate --story "..." --code src/ --format json --output report.j
 
 # Output as Markdown
 tdd-assistant validate --story "..." --code src/ --format markdown --output report.md
+
+# Interactive mode - review and manually verify criteria
+tdd-assistant validate --story "..." --code src/ --interactive
 ```
 
 ### Validate Command Options
@@ -122,9 +125,59 @@ tdd-assistant validate --story "..." --code src/ --format markdown --output repo
 | `--recursive` | Scan directory recursively for source files |
 | `--format <format>` | Output format: console (default), json, or markdown |
 | `--output <path>` | Output file path for the validation report |
-| `--interactive` | Enable interactive mode to review results |
+| `--interactive` | Enable interactive mode to review and verify results |
 | `--config <path>` | Path to configuration file |
 | `--model <model>` | AI model to use |
+
+### Interactive Validation Mode
+
+When using `--interactive`, you can review validation results and manually verify criteria:
+
+```
+═══════════════════════════════════════════════════════════════
+                 INTERACTIVE VALIDATION REVIEW
+═══════════════════════════════════════════════════════════════
+
+📖 STORY
+   login with email and password
+
+📊 COVERAGE
+   66.7% (2/3 covered)
+
+📋 CRITERIA
+───────────────────────────────────────────────────────────────
+1. AC-1
+   User can login with valid credentials
+   Status: covered (85% confidence)
+   Type: happy_path
+
+2. AC-2 [MANUALLY VERIFIED]
+   System displays error for invalid credentials
+   Status: covered (100% confidence)
+   Type: error
+
+3. AC-3
+   User session is created after successful login
+   Status: covered (90% confidence)
+   Type: functional
+
+───────────────────────────────────────────────────────────────
+Commands:
+  view <n>    - View details for criterion N
+  verify <n>  - Mark criterion N as manually verified
+  unverify <n>- Remove manual verification from criterion N
+  save        - Save and exit
+  cancel      - Exit without saving
+
+Enter command:
+```
+
+Interactive mode commands:
+- `view <n>` - View detailed evidence and suggestions for a criterion
+- `verify <n>` - Mark a criterion as manually verified (updates coverage)
+- `unverify <n>` - Remove manual verification
+- `save` - Save the final report with manual verifications applied
+- `cancel` - Exit without saving changes
 
 ### Example Validation Output
 
