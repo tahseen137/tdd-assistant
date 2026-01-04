@@ -30,6 +30,7 @@ export {
 // Criteria Matcher
 export {
   CriteriaMatcher,
+  CriteriaMatcherConfig,
   createCriteriaMatcher,
   createCoveredMatch,
   createPartiallyCoveredMatch,
