@@ -20,6 +20,7 @@ export {
 // Criteria Extractor
 export {
   CriteriaExtractor,
+  CriteriaExtractorConfig,
   createCriteriaExtractor,
   generateCriterionId,
   inferCriterionType,
