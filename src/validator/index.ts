@@ -42,6 +42,7 @@ export {
 // Validation Reporter
 export {
   ValidationReporter,
+  ValidationReporterConfig,
   createValidationReporter,
   calculateSummary,
   createValidationReport,
