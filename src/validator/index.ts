@@ -51,3 +51,18 @@ export {
   getStatusEmoji,
   formatCoveragePercentage
 } from './validation-reporter';
+
+// Validation Interactive Mode
+export {
+  ValidationInteractiveSession,
+  InteractiveValidationState,
+  InteractiveValidationResult,
+  createValidationInteractiveSession,
+  formatCriterionDisplay,
+  displayValidationSummary,
+  displayCriterionDetails,
+  parseViewCommand,
+  parseVerifyCommand,
+  parseUnverifyCommand,
+  applyManualVerifications
+} from './validation-interactive';
