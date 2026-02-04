@@ -25,20 +25,30 @@
     "tdd",
     "test-driven-development",
     "junit",
+    "junit5",
     "java",
     "spring-boot",
     "test-generation",
+    "test-automation",
     "cli",
     "ai",
     "openai",
-    "unit-testing"
+    "gpt-4",
+    "unit-testing",
+    "acceptance-testing",
+    "user-stories",
+    "code-validation"
   ],
-  "author": "",
+  "author": "tahseen137",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "https://github.com/tahseen137/tdd-assistant.git"
   },
+  "bugs": {
+    "url": "https://github.com/tahseen137/tdd-assistant/issues"
+  },
+  "homepage": "https://github.com/tahseen137/tdd-assistant#readme",
   "engines": {
     "node": ">=18.0.0"
   },
